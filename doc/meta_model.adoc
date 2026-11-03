@@ -16,11 +16,12 @@ It not clear from this documentation:
 - there is a general pattern decision regarding unique id. In some places it is requested to use a unique name for item in array
    Why not use object ? this means that name shall be removed from common attributes.
    Approach to uniqueness of items shall be uniform. I see 3 options:
-    1. Use object only when the key is predefined --> object will mapped internally to a type/struct for tooling. 
+    1. Use object only when the key are defined in schema --> object will mapped internally to a type/struct for tooling. 
        We use `name` as unique identified inside array.
-    2. Use object for all cases, with the key being the unique identifier for the item. This ensures uniformity and avoids ambiguity regarding uniqueness. --> in tools code we have to use hashmaps.
+    2. Use object for all cases, with the key being the unique identifier for the item and order of declaration doesn't matter. This ensures uniformity and avoids ambiguity regarding uniqueness. --> in tools code we have to use hashmaps.
        This allow to use JSON Pointer for referencing items within objects. https://datatracker.ietf.org/doc/html/rfc6901.
        It is a proposal but already widely adopted. in Rust, Javascript etc..
+       If order matters we use index and we don't need a unique identifier for the item.
    3. Use Yaml > 1.2version, which supports merge keys and anchors to handle uniqueness and references within arrays. Moreover YAML 1.2 is a superset of Json and also yaml schema is superset of JSON schema.
        
 
@@ -76,17 +77,17 @@ I guess is machine
 // it is not clear the purpose of word_size
 // do you mean "Default bit-width of any register contained in the device" ?
 // I think we miss also a value that describe maximum single data transfer supported by the bus infrastructure (svd has it. in case register size is bigger than maximum transfer size). This could be useful for debuggers
- word_size (integer):: Default word size, in bits, of the machine (e.g. 32, 64)
+word_size (integer):: Default word size, in bits, of the machine (e.g. 32, 64)
 imports (array):: Array of <<_import>>s, describing elements imported from other files
 memory_map (array):: Array of <<_addressable>>s describing the machine's memory map
 peripherals (array):: Array of <<_peripheral>>s featured by the machine
 overlappings (object):: Overlapping <<_peripheral>>s and <<_addressable>>s
 ////
 Overlapping need more clarification of intended use case.
-
 peripherals contains addressable
 is it allowed to overlap peripheral and also a single addressable contained in the peripheral? 
 
+I guess you mean here overlapping/memory_map rather than overlapping/addressable.
 ////
 overlappings/addressables (array of array of string):: Groups of overlapping (i.e. that represent the same hardware resource) <<_addressable>>s
 overlappings/peripherals (array of array of string):: Groups of overlapping (i.e. that represent the same hardware resource) <<_peripheral>>s
@@ -152,9 +153,13 @@ I recommend to change from `base` to `offset` to better reflect its role in addr
 For memory maps, you can add that when and addressable has no parent entity with base specified, it is assumed to base address 0.
 In this way you can support also memory map.
 
-Moreover I understood from our conversation that an addressable can be contained in another addressable, so the description shall include not onl;y peripheral but also other addressable entities.
+Moreover I understood from our conversation that an addressable can be contained in another addressable, so the description shall include not only peripheral but also other addressable entities.
 
 ////
+// I think that base or offset that are relative to the enclosing entity shall be moved out. 
+// e.g. when peripheral refer to enclose addressable it declares its base relative to that enclosing peripheral.
+// advantages reuse the declaration of addressable,register... in other location by reference.
+// This concept is inline with software where type declaration is decoupled from instantiation. --> need futher discussion 
 base (string, 🧮):: Base address of the addressable entity, relative to the enclosing <<_peripheral>> if applicable
 size (string, 🧮):: Size of the addressable entity, in bytes 
 read (boolean):: Whether the addressable entity is readable
@@ -193,6 +198,7 @@ ctr_addr_002:: `size` must evaluate to a signed integer number
 // As earlier why not using an object for registers
 ctr_addr_003:: No two <<_register>>s can have the same name
 // What does mean "valid" ? Do you mean "existing in the `registers` array"
+// We shall support nested addressable and therefore we need to support overlapping addressable.
 ctr_addr_004:: All names under `overlappings` shall reference valid <<_register>> names under `registers`
 ctr_addr_005:: `attributes/atomicity/amo_support` must be one of `none`, `swap`, `logical` or `arithmetic`
 ctr_addr_006:: `attributes/atomicity/reservability` must be one of `none`, `non_eventual` or `eventual`
@@ -233,6 +239,7 @@ on_reset (array):: Array of reset values/masks applicable to the register
 on_reset/__array-index__/name (string):: Name of applicable <<_reset>> defined at <<_machine>> level
 on_reset/__array-index__/value (string):: Reset value applicable to the register for the named <<_reset>>
 on_reset/__array-index__/mask (string):: Reset mask applicable to the register for the named <<_reset>>, all `1` s assumed if not defined
+// I would move the declaration of array dimensions (`indexing`) to the enclosing addressable, similar to how we handle peripheral.
 indexing (array):: Array of <<_indexing>>s, each representing an array dimension
 
 === Constraints
@@ -271,7 +278,7 @@ dimensions/__array-index__/lists/__array-index__/count (string, 🧮):: Number o
 dimensions/__array-index__/lists/__array-index__/stride (string, 🧮):: Stride of elements to choose from the list, assumed `1` if not defined
 
 === Constraints
-
+// Need more explanation about `rows` and `columns` and how relate with address calculation of single element.
 ctr_indx_001:: `layout` must be one of `rows` or `columns`
 ctr_indx_002:: `dimensions/__array-index__/name` must conform to the following regular expression: `[a-zA-Z]+[0-9a-zA-Z_]*`
 ctr_indx_003:: `dimensions/__array-index__/ranges` must contain one or more elements
@@ -299,6 +306,7 @@ ranges (array):: Array of acceptable value ranges for the field
 volatile (boolean):: Whether the field is considered __volatile__, i.e. it can be arbitrarily changed by hardware without any explicit software interaction (assumed from enclosing <<_register>> if not defined)
 // It shall be clarified the meaning and what is happening when not specified for a field. It shall be added that debuggers shall not read registers that contains this bitfield.
 on_read (array):: Effect(s) of reading the field, a restricted combination of `clear`, `set`, `toggle`, `modify` and `modify_external`
+// Not clear the usage of `on_write`. It seems a mix of enumenration value to write and the effect it has on the field.
 // This is replaced by oneToCler, zeroToClear and similar policies at the field level for finer control of write behavior at the bitfield level
 on_write (object):: Key/value map of numeric values accepted by the field and their effect(s), also a restricted combination of `clear`, `set`, `toggle`, `modify` and `modify_external`
 on_reset (array):: Array of reset values/masks applicable to the field
@@ -310,14 +318,17 @@ write_policy (string):: One of `preserve` (writes must mirror the last read valu
 // is ignore for reserved fields ?
 read_policy (string):: One of `ignore` (read values shall be ignored), `legal` (read values are always legal) or `any` (any value can be read, default if not specified)
 // The description of `indexing` doesn't fit the field use case e.g stride.
+// I would more the declaration of array of bitifield in enclosing register as suggested for peripheral.
 indexing (array):: Array of <<_indexing>>s, each representing an array dimension
 
 === Constraints
-
+//  `[-(w-1), w-1]` why negative bit positions. What does mean. I have not seen it in any other specification.
 ctr_fild_001:: `position` must be an integer number in the range `[-(w-1), w-1]` where `w` is the value of the `width` attribute from the enclosing <<_register>>
 ctr_fild_002:: `length` must be an integer number in the range `[1, w]` where `w` is the value of the `width` attribute from the enclosing <<_register>>
 ctr_fild_003:: No two <<_value>>s can have the same name
 ctr_fild_004:: In `on_read` values `clear`, `set`, `toggle` and `modify` are mutually exclusive
+// Why base 2. This could cause very long string.
+// I would support hex, binary and decimal values.
 ctr_fild_005:: `on_write` keys shall be base-2 (i.e. binary) values
 ctr_fild_006:: In `on_write` values `clear`, `set`, `toggle` and `modify` are mutually exclusive
 ctr_fild_007:: Each element of `ranges` must be a 2-element array of strings that evaluate to integer numbers
@@ -340,16 +351,21 @@ ctr_valu_001:: `value` must evaluate to an integer number
 instance (string):: Peripheral instance name, which differentiates it from other instantiations of the same peripheral
 imports (array):: Array of <<_import>>s, describing elements imported from other files
 word_size (integer):: Default word size, in bits, of the peripheral (assumed from <<_machine>> `word_size` if not defined)
+// As discussed earlier we can remove from here and require base decalration when instantiatiing at machine level.
 base (string, 🧮):: Base address of the peripheral
 addressables (array):: Array of <<_addressable>>s featured by the peripheral
 overlappings (array of array of string):: Groups of overlapping (i.e. that represent the same hardware resource) <<_addressable>>s
 parameters (array):: Array of peripheral-level <<_parameter>>s
+// As for base I would move it to the machine-level instantiation, rather than defining it at the peripheral level.
+// This allows reuse of the same peripheral definition at different base addresses within the machine.
+// Moreover if we put a peripheral in separated file and then we import in multiple machines, we don't want to force to have an predefined array of peripheral.
 indexing (array):: Array of <<_indexing>>s, each representing an array dimension
 
 === Constraints
 
 ctr_perp_001:: `instance` must conform to the following regular expression: `[a-zA-Z]+[0-9a-zA-Z_]*`
 ctr_perp_002:: `word_size` must be a multiple of 8
+// Why signed integer for base address? Typically base addresses are unsigned.
 ctr_perp_003:: `base` must evaluate to a signed integer number
 ctr_perp_004:: No two <<_import>>s can have the same name
 ctr_perp_005:: No two <<_addressable>>s can have the same name
@@ -360,11 +376,12 @@ ctr_perp_008:: No two <<_indexing>>s can have the same name
 == Parameter
 
 stage (string):: One of `compile`, `link`, `run`. Determines the stage at which the parameter value is to be defined
+// Missing 128 bits. Now supported also by C and Rust.
 class (string):: One of `uint8`, `uint16`, `uint32`, `uint64`, `int8`, `int16`, `int32`, `int64`. Determines the type of the parameter
 value (string, 🧮):: String representation of the parameter's numerical default value
 
 === Constraints
-
+// usually it is used unsigned. if really want to use signed we need to declare the binary representation e.g. complementary of two.
 ctr_parm_001:: `value` must evaluate to a signed integer number
 
 == Reset
